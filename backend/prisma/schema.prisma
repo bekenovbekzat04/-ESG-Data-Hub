@@ -1,0 +1,201 @@
+// This is your Prisma schema file
+// Learn more: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User model for authentication
+model User {
+  id        Int       @id @default(autoincrement())
+  email     String    @unique
+  password  String    // hashed password
+  name      String
+  role      String    @default("viewer") // admin, editor, viewer
+  active    Boolean   @default(true)
+  // Password reset fields
+  resetCode String?
+  resetCodeExpiry DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  
+  // Relations
+  auditLogs    AuditLog[]
+  importBatches ImportBatch[]
+  metrics      Metric[]
+  
+  @@map("users")
+}
+
+// ESG Metrics catalog
+model Metric {
+  id            Int               @id @default(autoincrement())
+  name          String
+  description   String?
+  category      String            // E, S, or G
+  subcategory   String?           // e.g., Energy, Waste, Water for E
+  scope         String?           // Scope 1, 2, 3 for Energy
+  definition    String?           // formal definition
+  unit          String?
+  status        String            @default("PLANNED") // PLANNED, IN_PROGRESS, COLLECTED, PARTIAL, NOT_COLLECTED
+  createdBy     Int?              // User ID who created/imported this metric
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  
+  // Relations
+  user          User?             @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+  metricLinks   MetricLink[]
+  standards     MetricStandard[]
+  importBatch   ImportBatch?   @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
+  importBatchId Int?
+  
+  @@map("metrics")
+}
+
+// Data sources
+model DataSource {
+  id              Int           @id @default(autoincrement())
+  name            String
+  type            String        // EXCEL, API, SURVEY, ERP, MANUAL
+  format          String?
+  updateFrequency String?       // MONTHLY, QUARTERLY, ANNUALLY, ONE_TIME
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  
+  // Relations
+  metricLinks     MetricLink[]
+  
+  @@map("data_sources")
+}
+
+// ESG Standards (GRI, SASB, TCFD, SDG, STARS, etc.)
+model Standard {
+  id        Int                @id @default(autoincrement())
+  name      String             @unique  // GRI, SASB, TCFD, SDG, STARS
+  code      String?            // e.g., GRI 305-1
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+  
+  // Relations
+  metrics   MetricStandard[]
+  
+  @@map("standards")
+}
+
+// Junction table: Metric -> Standard (many-to-many)
+model MetricStandard {
+  id        Int       @id @default(autoincrement())
+  metricId  Int
+  standardId Int
+  createdAt DateTime  @default(now())
+  
+  // Relations
+  metric    Metric    @relation(fields: [metricId], references: [id], onDelete: Cascade)
+  standard  Standard  @relation(fields: [standardId], references: [id], onDelete: Cascade)
+  
+  @@unique([metricId, standardId])
+  @@map("metric_standards")
+}
+
+// Departments (responsible units)
+model Department {
+  id                    Int           @id @default(autoincrement())
+  name                  String        @unique
+  owner                 String?       // data owner person
+  email                 String?
+  phone                 String?
+  messenger             String?       // Teams, Telegram handle
+  roleInDepartment      String?       // e.g., "Data Steward", "ESG Coordinator"
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+  
+  // Relations
+  metricLinks           MetricLink[]
+  
+  @@map("departments")
+}
+
+// Storage locations
+model StorageLocation {
+  id            Int           @id @default(autoincrement())
+  locationName  String
+  type          String        // DRIVE, SERVER, CLOUD, SHAREPOINT
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  
+  // Relations
+  metricLinks   MetricLink[]
+  
+  @@map("storage_locations")
+}
+
+// Import batch table for grouped uploads
+model ImportBatch {
+  id            Int       @id @default(autoincrement())
+  userId        Int
+  source        String    // 'GOOGLE_SHEETS', 'CSV_UPLOAD', 'MANUAL', etc.
+  sourceUrl     String?   // if from google sheets
+  fileName      String?   // if from uploaded CSV file
+  rowCount      Int       @default(0)
+  status        String    @default("COMPLETED") // PENDING, COMPLETED, FAILED
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  metrics       Metric[]
+
+  @@map("import_batches")
+}
+
+// Link table connecting metrics, sources, departments, and storage
+model MetricLink {
+  id              Int               @id @default(autoincrement())
+  metricId        Int
+  sourceId        Int?
+  departmentId    Int?
+  storageId       Int?
+  
+  // Quality metrics (0-100)
+  qualityScore    Int?              // Overall quality
+  completeness    Int?              // Data completeness
+  accuracy        Int?              // Data accuracy
+  timeliness      Int?              // Data timeliness
+  
+  // Status and issues
+  lastUpdate      DateTime?
+  issues          String?           // Text description of issues
+  issueType       String?           // MISSING, DUPLICATE, NO_AUTOMATION, QUALITY_LOW, OTHER
+  
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  
+  // Relations
+  metric          Metric            @relation(fields: [metricId], references: [id], onDelete: Cascade)
+  source          DataSource?       @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  department      Department?       @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  storage         StorageLocation?  @relation(fields: [storageId], references: [id], onDelete: SetNull)
+  
+  @@map("metric_links")
+}
+
+// Audit Log for tracking changes
+model AuditLog {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  action    String    // CREATE, UPDATE, DELETE, EXPORT
+  entity    String    // METRIC, SOURCE, DEPARTMENT, STORAGE, METRIC_LINK, USER
+  entityId  Int?      // ID of affected entity
+  details   String?   // JSON with what changed
+  createdAt DateTime  @default(now())
+  
+  // Relations
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("audit_logs")
+}
