@@ -6,6 +6,7 @@ A comprehensive web-based **Data Catalog** for managing ESG (Environmental, Soci
 
 This system helps organizations catalog, track, and manage ESG data by storing metadata about ESG metrics, their data sources, responsible departments, and storage locations.
 
+
 ## ✨ Key Features
 
 - **ESG Metrics Catalog**: Store and manage metrics with category (E/S/G), units, standards (GRI, STARS, SDG), and status
